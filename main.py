@@ -1,116 +1,95 @@
-import os, re, discord
-from discord.ext import commands
+# This example requires the 'members' privileged intents
+import os
+
+import discord
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-SERVER_ID = int(os.getenv("SERVER_ID"))
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.guilds = True
-intents.presences = True
+CHICAGO_ROLE_ID = os.getenv("CHICAGO_ROLE_ID")
+NYC_ROLE_ID = os.getenv("NYC_ROLE_ID")
 
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+class MyClient(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
+        self.role_message_id = 1020414801542918264  # ID of the message that can be reacted to to add/remove a role.
+        self.emoji_to_role = {
+            discord.PartialEmoji(name="🔴"): int(
+                CHICAGO_ROLE_ID
+            ),  # ID of the role associated with unicode emoji '🔴'.
+            discord.PartialEmoji(name="🟡"): int(
+                NYC_ROLE_ID
+            ),  # ID of the role associated with unicode emoji '🟡'.
+        }
 
-async def dm_about_roles(member):
-    print(f"DMing {member.name}...")
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        """Gives a role based on a reaction emoji."""
+        # Make sure that the message the user is reacting to is the one we care about.
+        if payload.message_id != self.role_message_id:
+            return
 
-    await member.send(
-        f"""Hi {member.name}, welcome to {member.guild.name}!
-
-Which chapter would you like to be part of:
-
-* NYC (🐍)
-* Chicago (🕸️)
-
-Reply to this message with one or more of the city's or emojis above so I can assign you the right roles on our server.
-
-Reply with the name or emoji of a city you're currently using and want to stop and I'll remove that role for you.
-"""
-    )
-
-
-async def assign_roles(message):
-    print("Assigning roles...")
-
-    languages = set(re.findall("nyc|chicago", message.content, re.IGNORECASE))
-    language_emojis = set(re.findall("\U0001F40D|\U0001F578", message.content))
-    # https://unicode.org/emoji/charts/full-emoji-list.html
-
-    # Convert emojis to names
-    for emoji in language_emojis:
-        {
-            "\U0001F40D": lambda: languages.add("nyc"),
-            "\U0001F578": lambda: languages.add("chicago"),
-        }[emoji]()
-
-    if languages:
-        server = bot.get_guild(SERVER_ID)
-
-        new_roles = set(
-            [
-                discord.utils.get(server.roles, name=language.lower())
-                for language in languages
-            ]
-        )
-
-        member = await server.fetch_member(message.author.id)
-
-        current_roles = set(member.roles)
-        roles_to_add = new_roles.difference(current_roles)
-        roles_to_remove = new_roles.intersection(current_roles)
+        guild = self.get_guild(payload.guild_id)
+        if guild is None:
+            # Check if we're still in the guild and it's cached.
+            return
 
         try:
-            await member.add_roles(
-                *roles_to_add, reason="Roles assigned by WelcomeBot."
-            )
-            await member.remove_roles(
-                *roles_to_remove, reason="Roles revoked by WelcomeBot."
-            )
-        except Exception as e:
-            print(e)
-            await message.channel.send("Error assigning/removing roles.")
-        else:
-            if roles_to_add:
-                await message.channel.send(
-                    f"You've been assigned the following role{'s' if len(roles_to_add) > 1 else ''} on {server.name}: { ', '.join([role.name for role in roles_to_add]) }"
-                )
+            role_id = self.emoji_to_role[payload.emoji]
+        except KeyError:
+            # If the emoji isn't the one we care about then exit as well.
+            return
 
-            if roles_to_remove:
-                await message.channel.send(
-                    f"You've lost the following role{'s' if len(roles_to_remove) > 1 else ''} on {server.name}: { ', '.join([role.name for role in roles_to_remove]) }"
-                )
+        role = guild.get_role(role_id)
+        if role is None:
+            # Make sure the role still exists and is valid.
+            return
+
+        try:
+            # Finally, add the role.
+            await payload.member.add_roles(role)
+        except discord.HTTPException:
+            # If we want to do something in case of errors we'd do it here.
+            pass
+
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        """Removes a role based on a reaction emoji."""
+        # Make sure that the message the user is reacting to is the one we care about.
+        if payload.message_id != self.role_message_id:
+            return
+
+        guild = self.get_guild(payload.guild_id)
+        if guild is None:
+            # Check if we're still in the guild and it's cached.
+            return
+
+        try:
+            role_id = self.emoji_to_role[payload.emoji]
+        except KeyError:
+            # If the emoji isn't the one we care about then exit as well.
+            return
+
+        role = guild.get_role(role_id)
+        if role is None:
+            # Make sure the role still exists and is valid.
+            return
+
+        # The payload for `on_raw_reaction_remove` does not provide `.member`
+        # so we must get the member ourselves from the payload's `.user_id`.
+        member = guild.get_member(payload.user_id)
+        if member is None:
+            # Make sure the member still exists and is valid.
+            return
+
+        try:
+            # Finally, remove the role.
+            await member.remove_roles(role)
+        except discord.HTTPException:
+            # If we want to do something in case of errors we'd do it here.
+            pass
 
 
-@bot.event
-async def on_member_join(member):
-    await dm_about_roles(member)
+intents = discord.Intents.default()
+intents.members = True
 
-
-@bot.event
-async def on_message(message):
-    print("Saw a message...")
-
-    if message.author == bot.user:
-        return  # prevent responding to self
-
-    # Assign roles from DM
-    if isinstance(message.channel, discord.channel.DMChannel):
-        await assign_roles(message)
-        return
-
-    # Respond to commands
-    if message.content.startswith("!roles"):
-        await dm_about_roles(message.author)
-    elif message.content.startswith("!serverid"):
-        await message.channel.send(message.channel.guild.id)
-
-
-@bot.event
-async def on_ready():
-    print(f"{bot.user} has connected to Discord!")
-
-
-bot.run(DISCORD_TOKEN)
+client = MyClient(intents=intents)
+client.run(DISCORD_TOKEN)
