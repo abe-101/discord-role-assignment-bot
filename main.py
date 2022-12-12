@@ -1,95 +1,52 @@
-# This example requires the 'members' privileged intents
-import os
-
 import discord
+import os
+from dotenv import load_dotenv
+
+
+from discord.ext import commands
+
+
+load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-CHICAGO_ROLE_ID = os.getenv("CHICAGO_ROLE_ID")
-NYC_ROLE_ID = os.getenv("NYC_ROLE_ID")
-
-
-class MyClient(discord.Client):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.role_message_id = 1020414801542918264  # ID of the message that can be reacted to to add/remove a role.
-        self.emoji_to_role = {
-            discord.PartialEmoji(name="🔴"): int(
-                CHICAGO_ROLE_ID
-            ),  # ID of the role associated with unicode emoji '🔴'.
-            discord.PartialEmoji(name="🟡"): int(
-                NYC_ROLE_ID
-            ),  # ID of the role associated with unicode emoji '🟡'.
-        }
-
-    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        """Gives a role based on a reaction emoji."""
-        # Make sure that the message the user is reacting to is the one we care about.
-        if payload.message_id != self.role_message_id:
-            return
-
-        guild = self.get_guild(payload.guild_id)
-        if guild is None:
-            # Check if we're still in the guild and it's cached.
-            return
-
-        try:
-            role_id = self.emoji_to_role[payload.emoji]
-        except KeyError:
-            # If the emoji isn't the one we care about then exit as well.
-            return
-
-        role = guild.get_role(role_id)
-        if role is None:
-            # Make sure the role still exists and is valid.
-            return
-
-        try:
-            # Finally, add the role.
-            await payload.member.add_roles(role)
-        except discord.HTTPException:
-            # If we want to do something in case of errors we'd do it here.
-            pass
-
-    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
-        """Removes a role based on a reaction emoji."""
-        # Make sure that the message the user is reacting to is the one we care about.
-        if payload.message_id != self.role_message_id:
-            return
-
-        guild = self.get_guild(payload.guild_id)
-        if guild is None:
-            # Check if we're still in the guild and it's cached.
-            return
-
-        try:
-            role_id = self.emoji_to_role[payload.emoji]
-        except KeyError:
-            # If the emoji isn't the one we care about then exit as well.
-            return
-
-        role = guild.get_role(role_id)
-        if role is None:
-            # Make sure the role still exists and is valid.
-            return
-
-        # The payload for `on_raw_reaction_remove` does not provide `.member`
-        # so we must get the member ourselves from the payload's `.user_id`.
-        member = guild.get_member(payload.user_id)
-        if member is None:
-            # Make sure the member still exists and is valid.
-            return
-
-        try:
-            # Finally, remove the role.
-            await member.remove_roles(role)
-        except discord.HTTPException:
-            # If we want to do something in case of errors we'd do it here.
-            pass
-
 
 intents = discord.Intents.default()
-intents.members = True
 
-client = MyClient(intents=intents)
-client.run(DISCORD_TOKEN)
+guild_id = 1017782904509710366  # Replace the 0s with your guild ID.
+
+
+class Bot(commands.Bot):
+    def __init__(self):
+        # initialize our bot instance, make sure to pass your intents!
+        # for this example, we'll just have everything enabled
+        super().__init__(
+            command_prefix="?",
+            intents=discord.Intents.all(),
+            activity=discord.Game(name="☕"),
+        )
+
+    # the method to override in order to run whatever you need before your bot starts
+    async def setup_hook(self):
+        for file in os.listdir(f"./cogs"):
+            if file.endswith(".py"):
+                extension = file[:-3]
+                try:
+                    await bot.load_extension(f"cogs.{extension}")
+                    print(f"Loaded extension '{extension}'")
+                except Exception as e:
+                    exception = f"{type(e).__name__}: {e}"
+                    print(f"Failed to load extension {extension}\n{exception}")
+
+
+bot = Bot()
+
+
+@bot.event
+async def on_ready():
+    # For guild commands
+    # await bot.tree.sync(guild=discord.Object(id=guild_id)) # Comment if you are using global commands.
+    # await tree.sync() # Uncomment if you want global commands.
+    print("Ready!")
+
+
+bot.run(DISCORD_TOKEN)
